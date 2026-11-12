@@ -30,7 +30,9 @@ object Storage {
             val pts = JSONArray()
             // Round to 0.01 world units: plenty of precision, much smaller files.
             for (v in s.points) pts.put(Math.round(v * 100.0) / 100.0)
-            arr.put(JSONObject().put("c", s.color).put("w", s.width.toDouble()).put("p", pts))
+            val o = JSONObject().put("c", s.color).put("w", s.width.toDouble()).put("p", pts)
+            if (s.filled) o.put("f", 1)
+            arr.put(o)
         }
         return JSONObject()
             .put("format", "infinite-canvas")
@@ -52,7 +54,7 @@ object Storage {
             val p = o.getJSONArray("p")
             if (p.length() < 2) continue
             val pts = FloatArray(p.length() - p.length() % 2) { p.getDouble(it).toFloat() }
-            list.add(InkStroke(pts, o.getInt("c"), o.getDouble("w").toFloat()))
+            list.add(InkStroke(pts, o.getInt("c"), o.getDouble("w").toFloat(), filled = o.optInt("f", 0) == 1))
         }
         return Loaded(
             list,

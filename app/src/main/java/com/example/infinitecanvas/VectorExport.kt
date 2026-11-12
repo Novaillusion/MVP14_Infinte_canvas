@@ -59,9 +59,18 @@ object VectorExport {
         sb.append("""<?xml version="1.0" encoding="UTF-8"?>""").append('\n')
         sb.append("""<svg xmlns="http://www.w3.org/2000/svg" width="$w" height="$h" viewBox="0 0 $w $h">""").append('\n')
         sb.append("""<g fill="none" stroke-linecap="round" stroke-linejoin="round">""").append('\n')
-        for (s in strokes) {
-            sb.append("""<path stroke="${hex(s.color)}" stroke-width="${f(s.width)}" d="${pathData(s.points, a.left, a.top)}"/>""")
-                .append('\n')
+        // Fills first so the ink sits on top, matching the app.
+        for (s in strokes.sortedBy { !it.filled }) {
+            val d = pathData(s.points, a.left, a.top)
+            val alpha = ((s.color ushr 24) and 0xFF) / 255f
+            if (s.filled) {
+                val op = if (alpha < 1f) """ fill-opacity="${f(alpha)}"""" else ""
+                sb.append("""<path fill="${hex(s.color)}"$op stroke="none" d="${d}Z"/>""")
+            } else {
+                val op = if (alpha < 1f) """ stroke-opacity="${f(alpha)}"""" else ""
+                sb.append("""<path stroke="${hex(s.color)}"$op stroke-width="${f(s.width)}" d="$d"/>""")
+            }
+            sb.append('\n')
         }
         sb.append("</g>\n</svg>\n")
         return sb.toString()
@@ -84,8 +93,9 @@ object VectorExport {
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
-        for (s in strokes) {
+        for (s in strokes.sortedBy { !it.filled }) {
             paint.color = s.color
+            paint.style = if (s.filled) Paint.Style.FILL else Paint.Style.STROKE
             paint.strokeWidth = s.width
             c.drawPath(s.path.asAndroidPath(), paint)
         }

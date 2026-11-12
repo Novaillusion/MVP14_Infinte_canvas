@@ -122,6 +122,13 @@ class MainActivity : ComponentActivity() {
                             .windowInsetsPadding(WindowInsets.safeDrawing)
                             .padding(12.dp)
                     )
+                    FlashLabel(
+                        state,
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .padding(top = 20.dp)
+                    )
                     ZoomControls(
                         state, size,
                         Modifier

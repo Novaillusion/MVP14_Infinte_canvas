@@ -6,7 +6,9 @@ An infinite drawing canvas for Android tablets with a stylus. Built with Kotlin 
 - **Pen draws**: the pen uses the selected tool (Pen or Eraser). Flipping to the stylus's eraser end erases automatically.
 - **Fingers navigate**: one finger pans, and two fingers pan and pinch-zoom (1% – 10,000%). Fingers never draw.
 - **Palm rejection**: while the pen is down, every finger and palm touch is ignored.
-- **Tools**: 7 ink colours, 4 pen sizes, a stroke eraser, undo/redo and clear (clear can be undone).
+- **Tools**: Pen (7 colours, 4 sizes), **Lasso fill**, Eraser, undo/redo and clear (clear can be undone).
+- **Lasso fill**: with the Fill tool, draw a shape with the pen. When you lift it, the shape closes and fills with the current colour. Use the slider to set the opacity. Fills always sit under the ink, and the eraser removes them like strokes.
+- **Undo / redo gestures**: tap with two fingers to undo and with three fingers to redo. Hold two fingers still to keep undoing until you lift them. A small label confirms each action.
 - **Zoom chip**: tap to go back to 100%. The ⌖ button fits the view to your drawing.
 
 ## Files (☰ menu, top left)

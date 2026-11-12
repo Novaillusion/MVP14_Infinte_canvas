@@ -1,6 +1,8 @@
 package com.example.infinitecanvas
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,16 +33,19 @@ import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AutoFixNormal
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +59,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 val InkColors = listOf(
     Color(0xFF1E1E1E), Color(0xFFE5484D), Color(0xFFF76B15), Color(0xFFFFC53D),
@@ -68,7 +75,7 @@ fun BottomToolbar(state: CanvasState, modifier: Modifier = Modifier) {
     var confirmClear by remember { mutableStateOf(false) }
 
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        AnimatedVisibility(visible = state.tool == Tool.Pen) {
+        AnimatedVisibility(visible = state.tool != Tool.Eraser) {
             Surface(shape = BarShape, shadowElevation = 6.dp, tonalElevation = 2.dp) {
                 Row(
                     Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -91,22 +98,33 @@ fun BottomToolbar(state: CanvasState, modifier: Modifier = Modifier) {
                         )
                     }
                     Spacer(Modifier.width(6.dp))
-                    for (sz in PenSizes) {
-                        val selected = state.penSizePx == sz
-                        Box(
-                            Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                                .clickable { state.penSizePx = sz },
-                            contentAlignment = Alignment.Center
-                        ) {
+                    if (state.tool == Tool.Fill) {
+                        // Fill opacity
+                        Text("${(state.fillOpacity * 100).roundToInt()}%", fontSize = 13.sp, modifier = Modifier.width(40.dp))
+                        Slider(
+                            value = state.fillOpacity,
+                            onValueChange = { state.fillOpacity = it },
+                            valueRange = 0.1f..1f,
+                            modifier = Modifier.width(150.dp)
+                        )
+                    } else {
+                        for (sz in PenSizes) {
+                            val selected = state.penSizePx == sz
                             Box(
                                 Modifier
-                                    .size((sz.coerceAtMost(16f) * 0.9f + 3f).dp)
+                                    .size(28.dp)
                                     .clip(CircleShape)
-                                    .background(Color(state.color))
-                            )
+                                    .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                                    .clickable { state.penSizePx = sz },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size((sz.coerceAtMost(16f) * 0.9f + 3f).dp)
+                                        .clip(CircleShape)
+                                        .background(Color(state.color))
+                                )
+                            }
                         }
                     }
                 }
@@ -116,6 +134,7 @@ fun BottomToolbar(state: CanvasState, modifier: Modifier = Modifier) {
         Surface(shape = BarShape, shadowElevation = 8.dp, tonalElevation = 2.dp) {
             Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 ToolButton(Icons.Filled.Brush, "Pen", state.tool == Tool.Pen) { state.tool = Tool.Pen }
+                ToolButton(Icons.Filled.FormatColorFill, "Lasso fill", state.tool == Tool.Fill) { state.tool = Tool.Fill }
                 ToolButton(Icons.Filled.AutoFixNormal, "Eraser", state.tool == Tool.Eraser) { state.tool = Tool.Eraser }
                 Box(
                     Modifier
@@ -124,10 +143,10 @@ fun BottomToolbar(state: CanvasState, modifier: Modifier = Modifier) {
                         .height(24.dp)
                         .background(MaterialTheme.colorScheme.outlineVariant)
                 )
-                IconButton(onClick = state::undo, enabled = state.canUndo) {
+                IconButton(onClick = { state.undo() }, enabled = state.canUndo) {
                     Icon(Icons.AutoMirrored.Filled.Undo, "Undo")
                 }
-                IconButton(onClick = state::redo, enabled = state.canRedo) {
+                IconButton(onClick = { state.redo() }, enabled = state.canRedo) {
                     Icon(Icons.AutoMirrored.Filled.Redo, "Redo")
                 }
                 IconButton(onClick = { confirmClear = true }, enabled = state.strokes.isNotEmpty()) {
@@ -222,4 +241,28 @@ fun FileMenu(
 @Composable
 private fun MenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
     DropdownMenuItem(text = { Text(label) }, leadingIcon = { Icon(icon, null) }, onClick = onClick)
+}
+
+/** Brief "Undo" / "Redo" label shown after a finger gesture. */
+@Composable
+fun FlashLabel(state: CanvasState, modifier: Modifier = Modifier) {
+    LaunchedEffect(state.flashId) {
+        if (state.flashText != null) {
+            delay(700)
+            state.flashText = null
+        }
+    }
+    AnimatedVisibility(visible = state.flashText != null, modifier = modifier, enter = fadeIn(), exit = fadeOut()) {
+        Surface(
+            shape = BarShape,
+            color = Color(0xE6202124),
+            contentColor = Color.White,
+        ) {
+            Text(
+                state.flashText ?: "",
+                fontSize = 15.sp,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
+            )
+        }
+    }
 }

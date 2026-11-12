@@ -14,8 +14,12 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
-/** A finished ink stroke. Points are flattened [x0, y0, x1, y1, ...] in WORLD coordinates. */
-class InkStroke(val points: FloatArray, val color: Int, val width: Float) {
+/**
+ * A finished ink stroke, or a filled lasso shape when [filled] is true.
+ * Points are flattened [x0, y0, x1, y1, ...] in WORLD coordinates.
+ * [color] is ARGB; fills carry their opacity in the alpha channel.
+ */
+class InkStroke(val points: FloatArray, val color: Int, val width: Float, val filled: Boolean = false) {
     val bounds: Rect
     val path: Path
 
@@ -30,21 +34,41 @@ class InkStroke(val points: FloatArray, val color: Int, val width: Float) {
             minY = min(minY, points[i + 1]); maxY = max(maxY, points[i + 1])
             i += 2
         }
-        val pad = width / 2f
+        val pad = if (filled) 0f else width / 2f
         bounds = Rect(minX - pad, minY - pad, maxX + pad, maxY + pad)
         path = buildSmoothPath(points)
+        if (filled) path.close()
     }
 
     /** True if world point [p] lies within [radius] of the stroke's centre line. */
     fun hits(p: Offset, radius: Float): Boolean {
-        val r = radius + width / 2f
+        val r = radius + if (filled) 0f else width / 2f
         if (!bounds.inflate(radius).contains(p)) return false
         val n = points.size / 2
+        if (filled) {
+            if (n >= 3 && insidePolygon(p)) return true
+            // also the closing edge back to the start
+            if (distToSegment(p, points[2 * n - 2], points[2 * n - 1], points[0], points[1]) <= r) return true
+        }
         if (n == 1) return hypot(points[0] - p.x, points[1] - p.y) <= r
         for (i in 0 until n - 1) {
             if (distToSegment(p, points[2 * i], points[2 * i + 1], points[2 * i + 2], points[2 * i + 3]) <= r) return true
         }
         return false
+    }
+
+    /** Even-odd ray casting against the raw polygon. */
+    private fun insidePolygon(p: Offset): Boolean {
+        val n = points.size / 2
+        var inside = false
+        var j = n - 1
+        for (i in 0 until n) {
+            val xi = points[2 * i]; val yi = points[2 * i + 1]
+            val xj = points[2 * j]; val yj = points[2 * j + 1]
+            if ((yi > p.y) != (yj > p.y) && p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi) inside = !inside
+            j = i
+        }
+        return inside
     }
 }
 
@@ -76,7 +100,7 @@ fun buildSmoothPath(pts: FloatArray, count: Int = pts.size / 2): Path {
     return path
 }
 
-enum class Tool { Pen, Eraser }
+enum class Tool { Pen, Fill, Eraser }
 
 private sealed interface Action {
     class Add(val stroke: InkStroke) : Action
@@ -107,6 +131,22 @@ class CanvasState {
     var tool by mutableStateOf(Tool.Pen)
     var color by mutableIntStateOf(0xFF1E1E1E.toInt())
     var penSizePx by mutableFloatStateOf(4f)
+    var fillOpacity by mutableFloatStateOf(1f)
+
+    private fun fillColor(): Int {
+        val a = (fillOpacity.coerceIn(0f, 1f) * 255f).toInt()
+        return (a shl 24) or (color and 0xFFFFFF)
+    }
+
+    /** Short on-screen message ("Undo", "Redo", …). [flashId] changes on every call. */
+    var flashText by mutableStateOf<String?>(null)
+    var flashId by mutableIntStateOf(0)
+        private set
+
+    fun flash(text: String) {
+        flashText = text
+        flashId++
+    }
 
     /** Screen-space position of the eraser while erasing (for drawing its outline). */
     var eraserCursor by mutableStateOf<Offset?>(null)
@@ -159,9 +199,12 @@ class CanvasState {
     private var buf = FloatArray(512)
     private var bufCount = 0 // number of points
     private var lastScreen = Offset.Zero
+    private var liveFill = false
 
-    fun beginStroke(screen: Offset) {
+    /** Starts a pen stroke, or a lasso fill shape when [fill] is true. */
+    fun beginStroke(screen: Offset, fill: Boolean = false) {
         bufCount = 0
+        liveFill = fill
         appendPoint(screen)
     }
 
@@ -180,11 +223,14 @@ class CanvasState {
         bufCount++
         lastScreen = screen
         // Width is stored in world units so it looks like the chosen size at the current zoom.
-        liveStroke = InkStroke(buf.copyOf(bufCount * 2), color, penSizePx / scale)
+        liveStroke =
+            if (liveFill) InkStroke(buf.copyOf(bufCount * 2), fillColor(), 0f, filled = true)
+            else InkStroke(buf.copyOf(bufCount * 2), color, penSizePx / scale)
     }
 
     fun endStroke() {
         val s = liveStroke ?: return
+        if (s.filled && s.points.size < 6) { cancelStroke(); return } // need 3+ points for an area
         liveStroke = null
         bufCount = 0
         strokes.add(s)
@@ -251,24 +297,28 @@ class CanvasState {
         changed()
     }
 
-    fun undo() {
-        val a = undoStack.removeLastOrNull() ?: return
+    /** Returns false (and shows a hint) when there's nothing to undo. */
+    fun undo(): Boolean {
+        val a = undoStack.removeLastOrNull() ?: run { flash("Nothing to undo"); return false }
         when (a) {
             is Action.Add -> strokes.remove(a.stroke)
             is Action.Remove -> strokes.addAll(a.strokes)
         }
         redoStack.addLast(a)
         changed()
+        return true
     }
 
-    fun redo() {
-        val a = redoStack.removeLastOrNull() ?: return
+    /** Returns false (and shows a hint) when there's nothing to redo. */
+    fun redo(): Boolean {
+        val a = redoStack.removeLastOrNull() ?: run { flash("Nothing to redo"); return false }
         when (a) {
             is Action.Add -> strokes.add(a.stroke)
             is Action.Remove -> strokes.removeAll(a.strokes)
         }
         undoStack.addLast(a)
         changed()
+        return true
     }
 
     private fun changed() {
