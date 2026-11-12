@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -110,6 +111,7 @@ fun InfiniteCanvas(state: CanvasState, modifier: Modifier = Modifier) {
                                     }) {
                                     navigating = true
                                     nextHoldUndo = Long.MAX_VALUE
+                                    state.beginNavigation()
                                 }
 
                                 // Arm hold-to-undo only while exactly 2 still fingers are down.
@@ -135,11 +137,12 @@ fun InfiniteCanvas(state: CanvasState, modifier: Modifier = Modifier) {
                                         break
                                     }
                                 } else if (navigating) {
-                                    // 1 finger = pan, 2+ fingers = pan + pinch-zoom.
+                                    // 1 finger = pan, 2+ fingers = pan + pinch-zoom + twist-rotate.
                                     state.transform(
                                         focus = event.calculateCentroid(useCurrent = true),
                                         pan = event.calculatePan(),
                                         zoom = event.calculateZoom(),
+                                        rotationDelta = if (down.size >= 2) event.calculateRotation() else 0f,
                                     )
                                 }
                             }
@@ -171,6 +174,7 @@ fun InfiniteCanvas(state: CanvasState, modifier: Modifier = Modifier) {
         val s = state.scale
         withTransform({
             translate(o.x, o.y)
+            rotate(state.rotation, pivot = Offset.Zero)
             scale(s, s, pivot = Offset.Zero)
         }) {
             // Fills first, so lines always sit on top of them.
@@ -227,6 +231,9 @@ private fun DrawScope.drawDotGrid(state: CanvasState) {
     val vis = state.visibleWorldRect(size)
     val ox = state.offset.x
     val oy = state.offset.y
+    val rad = Math.toRadians(state.rotation.toDouble())
+    val cs = (kotlin.math.cos(rad) * scale).toFloat()
+    val sn = (kotlin.math.sin(rad) * scale).toFloat()
     val minor = ArrayList<Offset>()
     val major = ArrayList<Offset>()
 
@@ -235,9 +242,11 @@ private fun DrawScope.drawDotGrid(state: CanvasState) {
     val j0 = floor(vis.top / step).toLong()
     val j1 = floor(vis.bottom / step).toLong() + 1
     for (j in j0..j1) {
-        val sy = (j * step) * scale + oy
+        val wy = j * step
         for (i in i0..i1) {
-            val p = Offset((i * step) * scale + ox, sy)
+            val wx = i * step
+            val p = Offset(wx * cs - wy * sn + ox, wx * sn + wy * cs + oy)
+            if (p.x < -4f || p.y < -4f || p.x > size.width + 4f || p.y > size.height + 4f) continue
             if (Math.floorMod(i, 5L) == 0L && Math.floorMod(j, 5L) == 0L) major.add(p) else minor.add(p)
         }
     }
@@ -245,8 +254,10 @@ private fun DrawScope.drawDotGrid(state: CanvasState) {
     drawPoints(major, PointMode.Points, MajorDot, strokeWidth = 5f, cap = StrokeCap.Round)
 }
 
-/** Zoom as a friendly percentage string. */
-fun zoomLabel(scale: Float): String {
+/** Zoom as a friendly percentage string, plus the angle when rotated. */
+fun zoomLabel(scale: Float, rotation: Float = 0f): String {
     val pct = scale * 100f
-    return if (pct >= 10f) "${pct.roundToLong()}%" else "%.1f%%".format(pct)
+    val z = if (pct >= 10f) "${pct.roundToLong()}%" else "%.1f%%".format(pct)
+    val deg = Math.round(rotation)
+    return if (deg == 0) z else "$z \u00B7 $deg\u00B0"
 }

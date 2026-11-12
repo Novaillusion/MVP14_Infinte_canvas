@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -184,11 +185,11 @@ fun ZoomControls(state: CanvasState, viewSize: Size, modifier: Modifier = Modifi
     Surface(modifier, shape = BarShape, shadowElevation = 6.dp, tonalElevation = 2.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                zoomLabel(state.scale),
+                zoomLabel(state.scale, state.rotation),
                 fontSize = 13.sp,
                 modifier = Modifier
                     .clip(BarShape)
-                    .clickable { state.zoomTo(1f, viewSize) }
+                    .clickable { state.resetView(viewSize) }
                     .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp)
             )
             IconButton(onClick = { state.fitToContent(viewSize) }) {
@@ -209,6 +210,10 @@ fun FileMenu(
     onSaveAs: () -> Unit,
     onExportSvg: () -> Unit,
     onExportPdf: () -> Unit,
+    snapRotation: Boolean,
+    lockRotation: Boolean,
+    onToggleSnap: () -> Unit,
+    onToggleLock: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -234,6 +239,15 @@ fun FileMenu(
             HorizontalDivider()
             MenuItem("Export SVG\u2026", Icons.Filled.Image) { open = false; onExportSvg() }
             MenuItem("Export PDF\u2026", Icons.Filled.PictureAsPdf) { open = false; onExportPdf() }
+            HorizontalDivider()
+            Text(
+                "View",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+            CheckItem("Snap rotation to 90\u00B0", snapRotation, onToggleSnap)
+            CheckItem("Lock rotation", lockRotation, onToggleLock)
         }
     }
 }
@@ -265,4 +279,13 @@ fun FlashLabel(state: CanvasState, modifier: Modifier = Modifier) {
             )
         }
     }
+}
+
+@Composable
+private fun CheckItem(label: String, checked: Boolean, onToggle: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        trailingIcon = { Checkbox(checked = checked, onCheckedChange = null) },
+        onClick = onToggle // menu stays open so both can be set in one go
+    )
 }

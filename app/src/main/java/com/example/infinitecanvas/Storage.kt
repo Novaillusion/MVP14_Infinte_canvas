@@ -16,11 +16,12 @@ object Storage {
     const val EXTENSION = "canvas"
     const val MIME = "application/octet-stream"
 
-    class Snapshot(val strokes: List<InkStroke>, val offset: Offset, val scale: Float)
+    class Snapshot(val strokes: List<InkStroke>, val offset: Offset, val scale: Float, val rotation: Float)
 
-    class Loaded(val strokes: List<InkStroke>, val offset: Offset, val scale: Float)
+    class Loaded(val strokes: List<InkStroke>, val offset: Offset, val scale: Float, val rotation: Float)
 
-    fun snapshot(state: CanvasState) = Snapshot(state.strokes.toList(), state.offset, state.scale)
+    fun snapshot(state: CanvasState) =
+        Snapshot(state.strokes.toList(), state.offset, state.scale, state.rotation)
 
     // ---------------- format ----------------
 
@@ -40,6 +41,7 @@ object Storage {
             .put("ox", snap.offset.x.toDouble())
             .put("oy", snap.offset.y.toDouble())
             .put("s", snap.scale.toDouble())
+            .put("r", snap.rotation.toDouble())
             .put("strokes", arr)
             .toString()
     }
@@ -59,7 +61,8 @@ object Storage {
         return Loaded(
             list,
             Offset(root.optDouble("ox", 0.0).toFloat(), root.optDouble("oy", 0.0).toFloat()),
-            root.optDouble("s", 1.0).toFloat()
+            root.optDouble("s", 1.0).toFloat(),
+            root.optDouble("r", 0.0).toFloat()
         )
     }
 

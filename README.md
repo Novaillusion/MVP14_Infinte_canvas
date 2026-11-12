@@ -4,7 +4,8 @@ An infinite drawing canvas for Android tablets with a stylus. Built with Kotlin 
 
 ## How it works
 - **Pen draws**: the pen uses the selected tool (Pen or Eraser). Flipping to the stylus's eraser end erases automatically.
-- **Fingers navigate**: one finger pans, and two fingers pan and pinch-zoom (1% – 10,000%). Fingers never draw.
+- **Fingers navigate**: one finger pans. Two fingers pan, pinch-zoom (1% – 10,000%) and twist to rotate. Fingers never draw.
+- **Rotation options** (☰ → View): *Snap rotation to 90°* (on by default) and *Lock rotation*. The zoom chip shows the angle, and tapping it resets the zoom to 100% and the angle to 0°.
 - **Palm rejection**: while the pen is down, every finger and palm touch is ignored.
 - **Tools**: Pen (7 colours, 4 sizes), **Lasso fill**, Eraser, undo/redo and clear (clear can be undone).
 - **Lasso fill**: with the Fill tool, draw a shape with the pen. When you lift it, the shape closes and fills with the current colour. Use the slider to set the opacity. Fills always sit under the ink, and the eraser removes them like strokes.
@@ -15,6 +16,7 @@ An infinite drawing canvas for Android tablets with a stylus. Built with Kotlin 
 - **New / Open… / Save / Save as…** use Android's file picker, so files can go to local storage, an SD card, or Google Drive and other cloud folders.
 - Drawings are `.canvas` files (JSON). They keep every stroke and the view position.
 - **Autosave**: about 1 s after any change, the open `.canvas` file is updated automatically. The app also keeps a hidden backup copy, so a drawing that has never been saved survives the app closing. A **•** next to the name means the drawing isn't saved to a file yet.
+- **Open…** offers Android's file picker and any file-manager apps on the tablet. You can also tap a `.canvas` file in your file manager (or use "Open with" or "Share") to open it in the app. If a file manager only gives read access, the drawing opens as unsaved and Save asks where to put it.
 - **Export SVG… / Export PDF…** produce true vector files. They are cropped to the drawing, with a transparent background and no grid.
 
 ## Getting the APK

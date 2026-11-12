@@ -10,9 +10,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * A finished ink stroke, or a filled lasso shape when [filled] is true.
@@ -123,7 +127,7 @@ class CanvasState {
     var version by mutableIntStateOf(0)
         private set
 
-    // ---- camera: screen = world * scale + offset ----
+    // ---- camera (see rotation below) ----
     var offset by mutableStateOf(Offset.Zero)
     var scale by mutableFloatStateOf(1f)
 
@@ -160,38 +164,72 @@ class CanvasState {
     var canRedo by mutableStateOf(false)
         private set
 
-    fun screenToWorld(p: Offset) = Offset((p.x - offset.x) / scale, (p.y - offset.y) / scale)
+    // Rotation of the view in degrees, (-180, 180]. Full camera:
+    //   screen = rotate(world * scale, rotation) + offset
+    var rotation by mutableFloatStateOf(0f)
+    var snapRotation by mutableStateOf(true)
+    var lockRotation by mutableStateOf(false)
+    private var rawRotation = 0f // unsnapped angle accumulated during a gesture
 
-    fun visibleWorldRect(size: Size) =
-        Rect(screenToWorld(Offset.Zero), screenToWorld(Offset(size.width, size.height)))
+    fun screenToWorld(p: Offset): Offset {
+        val v = rotate(p - offset, -rotation)
+        return Offset(v.x / scale, v.y / scale)
+    }
+
+    fun worldToScreen(w: Offset): Offset = rotate(w * scale, rotation) + offset
+
+    /** World-space bounding box of everything on screen (for culling). */
+    fun visibleWorldRect(size: Size): Rect {
+        val cs = listOf(
+            screenToWorld(Offset.Zero), screenToWorld(Offset(size.width, 0f)),
+            screenToWorld(Offset(0f, size.height)), screenToWorld(Offset(size.width, size.height))
+        )
+        return Rect(cs.minOf { it.x }, cs.minOf { it.y }, cs.maxOf { it.x }, cs.maxOf { it.y })
+    }
 
     // ---------------- camera ----------------
 
-    /** Zoom by [zoom] about screen point [focus], then pan by [pan]. */
-    fun transform(focus: Offset, pan: Offset, zoom: Float) {
-        val newScale = (scale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
-        val z = newScale / scale
-        offset = (offset - focus) * z + focus + pan
-        scale = newScale
+    /** Call when a finger navigation gesture starts. */
+    fun beginNavigation() {
+        rawRotation = rotation
     }
 
-    fun zoomTo(newScale: Float, viewSize: Size) {
+    /** Zoom by [zoom] and rotate by [rotationDelta] degrees about screen point [focus], then pan by [pan]. */
+    fun transform(focus: Offset, pan: Offset, zoom: Float, rotationDelta: Float = 0f) {
+        val anchor = screenToWorld(focus)
+        scale = (scale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
+        if (!lockRotation && rotationDelta != 0f) {
+            rawRotation = normalizeDeg(rawRotation + rotationDelta)
+            rotation = if (snapRotation) snapDeg(rawRotation) else rawRotation
+        }
+        offset = focus + pan - rotate(anchor * scale, rotation)
+    }
+
+    /** Back to 100% and 0°, keeping the centre of the screen where it is. */
+    fun resetView(viewSize: Size) {
         val c = Offset(viewSize.width / 2f, viewSize.height / 2f)
-        transform(c, Offset.Zero, newScale / scale)
+        val anchor = screenToWorld(c)
+        scale = 1f
+        rotation = 0f
+        rawRotation = 0f
+        offset = c - anchor
     }
 
+    /** Fits the whole drawing on screen, keeping the current rotation. */
     fun fitToContent(viewSize: Size) {
         val r = contentBounds()
+        val c = Offset(viewSize.width / 2f, viewSize.height / 2f)
         if (r == null || viewSize.width <= 0f) {
             scale = 1f
-            offset = Offset(viewSize.width / 2f, viewSize.height / 2f)
+            offset = c
             return
         }
-        val w = max(r.width, 1f)
-        val h = max(r.height, 1f)
+        val corners = listOf(r.topLeft, r.topRight, r.bottomLeft, r.bottomRight).map { rotate(it, rotation) }
+        val w = max(corners.maxOf { it.x } - corners.minOf { it.x }, 1f)
+        val h = max(corners.maxOf { it.y } - corners.minOf { it.y }, 1f)
         val s = (min(viewSize.width / w, viewSize.height / h) * 0.8f).coerceIn(MIN_SCALE, MAX_SCALE)
         scale = s
-        offset = Offset(viewSize.width / 2f - r.center.x * s, viewSize.height / 2f - r.center.y * s)
+        offset = c - rotate(r.center * s, rotation)
     }
 
     // ---------------- pen ----------------
@@ -328,13 +366,15 @@ class CanvasState {
     }
 
     /** Replaces the whole document (New / Open / restore). Clears undo history. */
-    fun replaceDocument(loaded: List<InkStroke>, camOffset: Offset, camScale: Float) {
+    fun replaceDocument(loaded: List<InkStroke>, camOffset: Offset, camScale: Float, camRotation: Float = 0f) {
         cancelStroke()
         endErase()
         strokes.clear()
         strokes.addAll(loaded)
         offset = camOffset
         scale = camScale.coerceIn(MIN_SCALE, MAX_SCALE)
+        rotation = normalizeDeg(camRotation)
+        rawRotation = rotation
         undoStack.clear()
         redoStack.clear()
         changed()
@@ -350,4 +390,28 @@ class CanvasState {
         )
         return r
     }
+}
+
+/** Rotates [v] by [deg] degrees (clockwise on screen, since y points down). */
+fun rotate(v: Offset, deg: Float): Offset {
+    if (deg == 0f) return v
+    val r = Math.toRadians(deg.toDouble())
+    val c = cos(r).toFloat()
+    val s = sin(r).toFloat()
+    return Offset(v.x * c - v.y * s, v.x * s + v.y * c)
+}
+
+fun normalizeDeg(d: Float): Float {
+    var a = d % 360f
+    if (a <= -180f) a += 360f
+    if (a > 180f) a -= 360f
+    return a
+}
+
+private const val SNAP_WITHIN_DEG = 7f
+
+/** Snaps to 0/90/180/270 when within a few degrees of it. */
+private fun snapDeg(d: Float): Float {
+    val nearest = (d / 90f).roundToInt() * 90f
+    return if (abs(d - nearest) <= SNAP_WITHIN_DEG) normalizeDeg(nearest) else d
 }

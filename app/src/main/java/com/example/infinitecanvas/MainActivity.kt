@@ -1,6 +1,7 @@
 package com.example.infinitecanvas
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -61,8 +62,10 @@ class MainActivity : ComponentActivity() {
     private val saveAsPicker = registerForActivityResult(ActivityResultContracts.CreateDocument(Storage.MIME)) { uri ->
         if (uri != null) saveAsTo(uri) else afterSaveAs = null
     }
-    private val openPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) openFrom(uri)
+    /** Open…: a chooser with Android's file picker plus any file-manager apps. */
+    private val openChooser = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val uri = res.data?.data
+        if (res.resultCode == RESULT_OK && uri != null) openFrom(uri)
     }
     private val svgPicker = registerForActivityResult(ActivityResultContracts.CreateDocument("image/svg+xml")) { uri ->
         if (uri != null) export(uri, pdf = false)
@@ -76,9 +79,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val restored = Storage.loadInternal(this)
-        if (restored != null) state.replaceDocument(restored.strokes, restored.offset, restored.scale)
+        if (restored != null) state.replaceDocument(restored.strokes, restored.offset, restored.scale, restored.rotation)
         else needsCentering = true
         restoreDocumentRef()
+        state.snapRotation = prefs.getBoolean("snapRotation", true)
+        state.lockRotation = prefs.getBoolean("lockRotation", false)
+        if (savedInstanceState == null) handleIncoming(intent)
 
         setContent {
             MaterialTheme(colorScheme = lightColorScheme()) {
@@ -95,7 +101,7 @@ class MainActivity : ComponentActivity() {
                 // Autosave ~1 s after any change: always to the hidden slot,
                 // and also into the open .canvas file if there is one.
                 LaunchedEffect(Unit) {
-                    snapshotFlow { Triple(state.version, state.offset, state.scale) }
+                    snapshotFlow { listOf(state.version, state.offset, state.scale, state.rotation) }
                         .collectLatest {
                             delay(1000)
                             autosave()
@@ -112,11 +118,21 @@ class MainActivity : ComponentActivity() {
                         title = docName,
                         unsaved = docUri == null && state.strokes.isNotEmpty(),
                         onNew = { guardUnsaved(::newDocument) },
-                        onOpen = { guardUnsaved { openPicker.launch(arrayOf("*/*")) } },
+                        onOpen = { guardUnsaved(::launchOpenChooser) },
                         onSave = ::save,
                         onSaveAs = { saveAsPicker.launch(suggestedName(Storage.EXTENSION)) },
                         onExportSvg = { if (checkNotEmpty()) svgPicker.launch(suggestedName("svg")) },
                         onExportPdf = { if (checkNotEmpty()) pdfPicker.launch(suggestedName("pdf")) },
+                        snapRotation = state.snapRotation,
+                        lockRotation = state.lockRotation,
+                        onToggleSnap = {
+                            state.snapRotation = !state.snapRotation
+                            prefs.edit().putBoolean("snapRotation", state.snapRotation).apply()
+                        },
+                        onToggleLock = {
+                            state.lockRotation = !state.lockRotation
+                            prefs.edit().putBoolean("lockRotation", state.lockRotation).apply()
+                        },
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -166,6 +182,50 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIncoming(intent)
+    }
+
+    /** A .canvas file opened from a file manager ("Open with") or shared to the app. */
+    private fun handleIncoming(intent: Intent?) {
+        val uri: Uri? = when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> intentStreamUri(intent)
+            else -> null
+        }
+        if (uri != null) guardUnsaved { openFrom(uri) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun intentStreamUri(intent: Intent): Uri? =
+        if (android.os.Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        else intent.getParcelableExtra(Intent.EXTRA_STREAM)
+
+    private fun launchOpenChooser() {
+        // Android's picker (OPEN_DOCUMENT) gives lasting read/write access, so autosave works.
+        val systemPicker = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*")
+        // File-manager apps answer GET_CONTENT. Android's own picker answers it too, but
+        // without lasting access, so it is left out here: it's already offered above.
+        val getContent = Intent(Intent.ACTION_GET_CONTENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*")
+        @Suppress("DEPRECATION")
+        val excluded = packageManager.queryIntentActivities(getContent, 0)
+            .filter { it.activityInfo.packageName.contains("documentsui") }
+            .map { android.content.ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
+        val chooser = Intent.createChooser(getContent, "Open drawing with")
+            .putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(systemPicker))
+            .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, excluded.toTypedArray())
+        try {
+            openChooser.launch(chooser)
+        } catch (_: Exception) {
+            openChooser.launch(systemPicker)
         }
     }
 
@@ -236,8 +296,12 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
             takePermission(uri)
-            state.replaceDocument(loaded.strokes, loaded.offset, loaded.scale)
-            setDocument(uri, displayName(uri))
+            state.replaceDocument(loaded.strokes, loaded.offset, loaded.scale, loaded.rotation)
+            // If we may write to it, autosave goes into this file. Otherwise (e.g. some
+            // file managers give read-only access) it opens as unsaved; Save asks where.
+            val writable = checkCallingOrSelfUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) ==
+                PackageManager.PERMISSION_GRANTED
+            setDocument(if (writable) uri else null, displayName(uri))
         }
     }
 
