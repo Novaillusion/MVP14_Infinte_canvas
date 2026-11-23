@@ -1,40 +1,55 @@
-# Infinite Canvas (Android tablet + pen)
+# Infinite Canvas (Android tablet + Windows)
 
-An infinite drawing canvas for Android tablets with a stylus. Built with Kotlin and Jetpack Compose.
+An infinite drawing canvas for an Android tablet with a pen and a Windows PC, built with Kotlin and Compose. Drawings sync between the two through **Syncthing**, with no server needed.
 
-## How it works
-- **Pen draws**: the pen uses the selected tool (Pen or Eraser). Flipping to the stylus's eraser end erases automatically.
-- **Fingers navigate**: one finger pans. Two fingers pan, pinch-zoom (1% – 10,000%) and twist to rotate. Fingers never draw.
-- **Rotation options** (☰ → View): *Snap rotation to 90°* (on by default) and *Lock rotation*. The zoom chip shows the angle, and tapping it resets the zoom to 100% and the angle to 0°.
-- **Palm rejection**: while the pen is down, every finger and palm touch is ignored.
-- **Tools**: Pen (7 colours, 4 sizes), **Lasso fill**, Eraser, undo/redo and clear (clear can be undone).
-- **Lasso fill**: with the Fill tool, draw a shape with the pen. When you lift it, the shape closes and fills with the current colour. Use the slider to set the opacity. Fills always sit under the ink, and the eraser removes them like strokes.
-- **Undo / redo gestures**: tap with two fingers to undo and with three fingers to redo. Hold two fingers still to keep undoing until you lift them. A small label confirms each action.
-- **Zoom chip**: tap to go back to 100%. The ⌖ button fits the view to your drawing.
+## Drawing on the tablet
+- **Pen** draws with the selected tool: Pen, **Lasso fill** or Eraser. Flipping to the stylus's eraser end erases.
+- **Fingers navigate**: one finger pans. Two fingers pan, pinch-zoom (1% – 10,000%) and twist to rotate. Fingers never draw, and palm touches are ignored while the pen is down.
+- **Two-finger tap** undoes, **three-finger tap** redoes, and holding two fingers still keeps undoing.
 
-## Files (☰ menu, top left)
-- **New / Open… / Save / Save as…** use Android's file picker, so files can go to local storage, an SD card, or Google Drive and other cloud folders.
-- Drawings are `.canvas` files (JSON). They keep every stroke and the view position.
-- **Autosave**: about 1 s after any change, the open `.canvas` file is updated automatically. The app also keeps a hidden backup copy, so a drawing that has never been saved survives the app closing. A **•** next to the name means the drawing isn't saved to a file yet.
-- **Open…** offers Android's file picker and any file-manager apps on the tablet. You can also tap a `.canvas` file in your file manager (or use "Open with" or "Share") to open it in the app. If a file manager only gives read access, the drawing opens as unsaved and Save asks where to put it.
-- **Export SVG… / Export PDF…** produce true vector files. They are cropped to the drawing, with a transparent background and no grid.
+## Drawing on Windows
+| Action | Mouse / pen tablet | Keyboard |
+|---|---|---|
+| Draw with current tool | Left-drag / pen tip | B or P = pen, F = fill, E = eraser |
+| Pan | Right- or middle-drag, or Space + drag | |
+| Zoom | Mouse wheel | + / − |
+| Rotate | Shift + wheel | [ and ] (15° steps) |
+| Reset view / fit drawing | | 0 / Home |
+| Undo / redo | | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) |
+| New / Drawings / Save / Save as | | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S |
 
-## Getting the APK
-Every push to `main` builds the app with GitHub Actions.
-1. Open the repo's **Actions** tab and select the latest **Build APK** run.
-2. Download **InfiniteCanvas-apk** from the run's **Artifacts** and unzip it.
-3. Copy the `.apk` to the tablet and open it. Allow "install unknown apps" if Android asks.
+Pen tablets act as a mouse on Windows (pressure isn't used).
 
-Builds are signed with `app/signing.keystore`, a fixed key kept in the repo, so each new APK installs as an update and your drawings are kept. This is fine for a personal app. Use a private key if you ever publish it.
+## Both apps
+- **Tools**: 7 colours, 4 pen sizes, lasso fill with opacity, stroke eraser, undo/redo and clear (clear can be undone).
+- **View options** (☰ → View): *Snap rotation to 90°* and *Lock rotation*. The zoom chip shows zoom and angle; tap it to reset both.
+- **☰ menu**: New drawing, Drawings…, Save, Save as…, Open other file…, Export SVG… / PDF…, and Drawings folder.
+- **Export** produces true vector SVG and PDF files, cropped to the drawing, with a transparent background and no grid.
 
-Requires Android 8.0+.
+## Syncing with Syncthing
+1. Install **Syncthing** on the PC and **Syncthing-Fork** on the tablet (from F-Droid). Share one folder between them, e.g. `Drawings`.
+2. In each app, open ☰ → **Drawings folder** and pick that shared folder.
+3. Save drawings there (☰ → Save). Every change is then saved automatically about 1 s later, and Syncthing carries it to the other device.
 
-## Code map
-| File | Purpose |
+How the apps keep sync safe:
+- **Changes from the other device** are picked up automatically (checked every few seconds) and merged into what's on screen.
+- **Conflicts**: if both devices changed a drawing before syncing, Syncthing keeps a `…sync-conflict-….canvas` copy. The app merges it automatically (keeping strokes from both sides) and deletes the copy.
+- **Erasing syncs too**: each file remembers which strokes were erased, so merging never brings them back.
+- **Zoom, position and angle are kept per device**, so just looking at a drawing never changes the file.
+
+## Getting the apps
+Every push to `main` builds both apps with GitHub Actions. Open **Actions** → latest **Build** run → **Artifacts**:
+- **InfiniteCanvas-apk**: unzip it and install the `.apk` on the tablet. It installs as an update over older versions.
+- **InfiniteCanvas-windows-msi**: unzip it and run the `.msi`. It installs per user (no admin needed), adds a Start-menu entry, and newer installers upgrade the installed app.
+
+The APK is signed with `app/signing.keystore`, a fixed key kept in the repo, so updates install over each other. This is fine for a personal app.
+
+## Project layout
+| Folder | Contents |
 |---|---|
-| `CanvasState.kt` | Strokes (world coordinates), camera, pen/eraser logic, undo/redo |
-| `InfiniteCanvas.kt` | Rendering and pen/finger input handling |
-| `Toolbar.kt` | Bottom toolbar, colours and sizes, zoom controls, file menu |
-| `Storage.kt` | `.canvas` format, hidden autosave, reading and writing user files |
-| `VectorExport.kt` | SVG and PDF export |
-| `MainActivity.kt` | File pickers, open/save/export, autosave |
+| `shared/src` | Code used by both apps: canvas model, rendering, toolbar and menus, `.canvas` format, SVG export, sync logic (`AppController`) |
+| `app/` | Android app: pen/finger input, folder and file access, PDF export |
+| `desktop/` | Windows app: mouse/keyboard input, file dialogs, PDF export (PDFBox), MSI packaging |
+
+### The `.canvas` format (v2)
+JSON with `strokes` (each has an `id`, colour `c`, width `w`, points `p`, and `f: 1` for fills) and `deleted` (IDs of erased strokes). Version 1 files from older builds still open.
