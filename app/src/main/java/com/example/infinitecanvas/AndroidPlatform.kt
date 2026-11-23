@@ -15,7 +15,7 @@ import java.io.File
  * Must be created during the activity's onCreate (it registers result launchers).
  */
 class AndroidPlatform(private val activity: ComponentActivity) : Platform {
-    private val prefs = activity.getSharedPreferences("app", ComponentActivity.MODE_PRIVATE)
+    private val prefs = activity.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
     private val cr get() = activity.contentResolver
 
     // ---- pickers (registered up front, callbacks stored per launch) ----
@@ -33,7 +33,7 @@ class AndroidPlatform(private val activity: ComponentActivity) : Platform {
     }
     private val filePicker = activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val uri = res.data?.data
-        if (res.resultCode == ComponentActivity.RESULT_OK && uri != null) {
+        if (res.resultCode == android.app.Activity.RESULT_OK && uri != null) {
             takePermission(uri)
             onFile?.invoke(uri.toString())
         }
