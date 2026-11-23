@@ -38,10 +38,17 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
             packageName = "InfiniteCanvas"
-            packageVersion = "2.0.0"
+            packageVersion = "2.1.0"
             description = "Infinite drawing canvas"
             vendor = "Novaillusion"
             includeAllModules = true
+            // Double-clicking a .canvas file in File Explorer opens it in the app.
+            fileAssociation(
+                mimeType = "application/x-infinite-canvas",
+                extension = "canvas",
+                description = "Infinite Canvas drawing",
+                windowsIconFile = project.file("icons/app.ico"),
+            )
             windows {
                 iconFile.set(project.file("icons/app.ico"))
                 menu = true

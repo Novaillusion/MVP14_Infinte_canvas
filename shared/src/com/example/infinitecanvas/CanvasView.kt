@@ -16,6 +16,9 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import kotlin.math.floor
 import kotlin.math.roundToLong
 
+/** Thinnest a line may look on screen, in pixels (display only; files are unchanged). */
+private const val MIN_SCREEN_WIDTH_PX = 1.2f
+
 private val PaperColor = Color(0xFFFAF9F6)
 private val MinorDot = Color(0xFFD3D1CB)
 private val MajorDot = Color(0xFFB4B1A9)
@@ -33,6 +36,7 @@ fun InfiniteCanvas(state: CanvasState, inputModifier: Modifier, modifier: Modifi
         val visible = state.visibleWorldRect(size)
         val o = state.offset
         val s = state.scale
+        val minWidth = MIN_SCREEN_WIDTH_PX / s
         withTransform({
             translate(o.x, o.y)
             rotate(state.rotation, pivot = Offset.Zero)
@@ -40,13 +44,13 @@ fun InfiniteCanvas(state: CanvasState, inputModifier: Modifier, modifier: Modifi
         }) {
             // Fills first, so lines always sit on top of them.
             for (stroke in state.strokes) {
-                if (stroke.filled && stroke.bounds.overlaps(visible)) drawInk(stroke)
+                if (stroke.filled && stroke.bounds.overlaps(visible)) drawInk(stroke, minWidth)
             }
             for (stroke in state.strokes) {
-                if (!stroke.filled && stroke.bounds.overlaps(visible)) drawInk(stroke)
+                if (!stroke.filled && stroke.bounds.overlaps(visible)) drawInk(stroke, minWidth)
             }
             state.liveStroke?.let {
-                drawInk(it)
+                drawInk(it, minWidth)
                 if (it.filled) {
                     // Show the lasso outline while drawing a fill.
                     drawPath(
@@ -64,14 +68,15 @@ fun InfiniteCanvas(state: CanvasState, inputModifier: Modifier, modifier: Modifi
     }
 }
 
-private fun DrawScope.drawInk(s: InkStroke) {
+/** [minWidth] (world units) keeps lines at least ~1 screen pixel wide when zoomed far out. */
+private fun DrawScope.drawInk(s: InkStroke, minWidth: Float) {
     if (s.filled) {
         drawPath(s.path, Color(s.color), style = Fill)
     } else {
         drawPath(
             s.path,
             Color(s.color),
-            style = Stroke(width = s.width, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            style = Stroke(width = maxOf(s.width, minWidth), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
     }
 }

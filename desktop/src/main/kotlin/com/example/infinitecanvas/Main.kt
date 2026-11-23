@@ -12,14 +12,22 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import javax.swing.UIManager
 
-fun main() {
+/** [args] holds a file path when a .canvas file is opened from File Explorer. */
+fun main(args: Array<String>) {
     // Native-looking folder chooser.
     runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
 
     application {
         val scope = rememberCoroutineScope()
         val platform = remember { DesktopPlatform() }
-        val controller = remember { AppController(platform, scope).also { it.start() } }
+        val controller = remember {
+            AppController(platform, scope).also { c ->
+                c.start()
+                args.firstOrNull { it.lowercase().endsWith(".${DocFormat.EXTENSION}") }
+                    ?.let { java.io.File(it).absolutePath }
+                    ?.let(c::open)
+            }
+        }
         val keys = remember { DesktopKeys() }
         val icon = remember {
             Thread.currentThread().contextClassLoader.getResourceAsStream("icon.png")

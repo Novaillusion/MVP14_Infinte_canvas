@@ -333,13 +333,18 @@ fun NameDialog(c: AppController) {
 fun DiscardDialog(c: AppController) {
     val action = c.pendingAction ?: return
     AlertDialog(
-        onDismissRequest = { c.pendingAction = null },
-        title = { Text("Discard current drawing?") },
-        text = { Text("It hasn't been saved to a file yet.") },
+        onDismissRequest = { c.cancelPending() },
+        title = { Text("You have an unsaved drawing") },
+        text = {
+            Text(
+                "The drawing on screen isn't saved to a file yet. Save it first, discard it, " +
+                    "or cancel and keep working on it."
+            )
+        },
         confirmButton = { TextButton(onClick = { c.saveThen(action) }) { Text("Save\u2026") } },
         dismissButton = {
             Row {
-                TextButton(onClick = { c.pendingAction = null }) { Text("Cancel") }
+                TextButton(onClick = { c.cancelPending() }) { Text("Cancel") }
                 TextButton(onClick = { c.pendingAction = null; action() }) { Text("Discard") }
             }
         }

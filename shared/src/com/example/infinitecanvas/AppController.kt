@@ -276,6 +276,12 @@ class AppController(val platform: Platform, private val scope: CoroutineScope) {
         if (unsaved) pendingAction = action else action()
     }
 
+    /** "Cancel" in the unsaved-drawing dialog. */
+    fun cancelPending() {
+        pendingAction = null
+        state.flash("Cancelled \u2014 your unsaved drawing is still here")
+    }
+
     fun newDrawing() = guardUnsaved {
         scope.launch {
             if (docId != null) saveNow(quiet = true)
@@ -304,9 +310,14 @@ class AppController(val platform: Platform, private val scope: CoroutineScope) {
     fun open(id: String) = guardUnsaved {
         scope.launch {
             if (docId != null) saveNow(quiet = true)
-            val doc = withContext(Dispatchers.IO) { runCatching { DocFormat.decode(platform.read(id)) }.getOrNull() }
+            val text = withContext(Dispatchers.IO) { runCatching { platform.read(id) }.getOrNull() }
+            if (text == null) {
+                state.flash("Couldn't read ${platform.displayName(id)}")
+                return@launch
+            }
+            val doc = runCatching { DocFormat.decode(text) }.getOrNull()
             if (doc == null) {
-                state.flash("That isn't a canvas file")
+                state.flash("${platform.displayName(id)} isn't a canvas file")
                 return@launch
             }
             state.replaceDocument(doc.strokes, doc.deleted)
