@@ -1,4 +1,4 @@
-name: Build APK
+name: Build
 
 on:
   push:
@@ -7,26 +7,41 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  android:
+    name: Android APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-
       - uses: gradle/actions/setup-gradle@v4
-
       - name: Build release APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+          ./gradlew :app:assembleRelease --stacktrace
+      - uses: actions/upload-artifact@v4
         with:
           name: InfiniteCanvas-apk
           path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build MSI
+        shell: bash
+        run: ./gradlew :desktop:packageMsi --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: InfiniteCanvas-windows-msi
+          path: desktop/build/compose/binaries/main/msi/*.msi
           if-no-files-found: error

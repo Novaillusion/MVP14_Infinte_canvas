@@ -18,6 +18,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material3.OutlinedTextField
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FolderOpen
@@ -199,24 +209,11 @@ fun ZoomControls(state: CanvasState, viewSize: Size, modifier: Modifier = Modifi
     }
 }
 
-/** Top-left: file name (• = unsaved) and the File menu. */
+/** Top-left: drawing name (• = not saved to a file yet) and the ☰ menu. */
 @Composable
-fun FileMenu(
-    title: String,
-    unsaved: Boolean,
-    onNew: () -> Unit,
-    onOpen: () -> Unit,
-    onSave: () -> Unit,
-    onSaveAs: () -> Unit,
-    onExportSvg: () -> Unit,
-    onExportPdf: () -> Unit,
-    snapRotation: Boolean,
-    lockRotation: Boolean,
-    onToggleSnap: () -> Unit,
-    onToggleLock: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+fun FileMenu(c: AppController, modifier: Modifier = Modifier) {
     var open by remember { mutableStateOf(false) }
+    val state = c.state
     Box(modifier) {
         Surface(shape = BarShape, shadowElevation = 6.dp, tonalElevation = 2.dp) {
             Row(
@@ -226,19 +223,28 @@ fun FileMenu(
                     .padding(start = 8.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Filled.Menu, "File menu", Modifier.padding(8.dp))
-                Text(title, fontSize = 15.sp, maxLines = 1, modifier = Modifier.widthIn(max = 280.dp))
-                if (unsaved) Text("  \u2022", fontSize = 15.sp, color = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Filled.Menu, "Menu", Modifier.padding(8.dp))
+                Text(
+                    c.docName.removeSuffix(".${DocFormat.EXTENSION}"),
+                    fontSize = 15.sp, maxLines = 1, modifier = Modifier.widthIn(max = 280.dp)
+                )
+                if (c.unsaved) Text("  \u2022", fontSize = 15.sp, color = MaterialTheme.colorScheme.primary)
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            MenuItem("New", Icons.Filled.Add) { open = false; onNew() }
-            MenuItem("Open\u2026", Icons.Filled.FolderOpen) { open = false; onOpen() }
-            MenuItem("Save", Icons.Filled.Save) { open = false; onSave() }
-            MenuItem("Save as\u2026", Icons.Filled.SaveAs) { open = false; onSaveAs() }
+            MenuItem("New drawing", Icons.Filled.Add) { open = false; c.newDrawing() }
+            MenuItem("Drawings\u2026", Icons.Filled.FolderOpen) { open = false; c.openDrawingsDialog() }
+            MenuItem("Save", Icons.Filled.Save) { open = false; c.save() }
+            MenuItem("Save as\u2026", Icons.Filled.SaveAs) { open = false; c.startSaveAs() }
+            MenuItem("Open other file\u2026", Icons.Filled.FileOpen) { open = false; c.openOtherFile() }
             HorizontalDivider()
-            MenuItem("Export SVG\u2026", Icons.Filled.Image) { open = false; onExportSvg() }
-            MenuItem("Export PDF\u2026", Icons.Filled.PictureAsPdf) { open = false; onExportPdf() }
+            MenuItem("Export SVG\u2026", Icons.Filled.Image) { open = false; c.export(ExportKind.Svg) }
+            MenuItem("Export PDF\u2026", Icons.Filled.PictureAsPdf) { open = false; c.export(ExportKind.Pdf) }
+            HorizontalDivider()
+            MenuItem(
+                "Drawings folder: " + (c.folderName ?: "not set"),
+                Icons.Filled.Folder
+            ) { open = false; c.chooseFolder() }
             HorizontalDivider()
             Text(
                 "View",
@@ -246,10 +252,98 @@ fun FileMenu(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
-            CheckItem("Snap rotation to 90\u00B0", snapRotation, onToggleSnap)
-            CheckItem("Lock rotation", lockRotation, onToggleLock)
+            CheckItem("Snap rotation to 90\u00B0", state.snapRotation) { c.toggleSnap() }
+            CheckItem("Lock rotation", state.lockRotation) { c.toggleLock() }
         }
     }
+}
+
+/** List of drawings in the Drawings folder. */
+@Composable
+fun DrawingsDialog(c: AppController) {
+    val fmt = remember { SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()) }
+    AlertDialog(
+        onDismissRequest = { c.showDrawings = false },
+        title = { Text("Drawings") },
+        text = {
+            if (c.folderName == null) {
+                Text("Choose the folder that Syncthing shares between your devices.")
+            } else if (c.drawings.isEmpty()) {
+                Text("No drawings in \u201c${c.folderName}\u201d yet. Use Save to add the current one.")
+            } else {
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(c.drawings, key = { it.id }) { e ->
+                        val current = e.id == c.docId
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (current) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                                .clickable { c.open(e.id) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Text(e.name.removeSuffix(".${DocFormat.EXTENSION}"), fontSize = 16.sp, maxLines = 1)
+                            if (e.modified > 0) Text(
+                                fmt.format(Date(e.modified)), fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { c.showDrawings = false }) { Text("Close") }
+        },
+        dismissButton = {
+            TextButton(onClick = { c.chooseFolder() }) {
+                Text(if (c.folderName == null) "Choose folder\u2026" else "Change folder\u2026")
+            }
+        }
+    )
+}
+
+/** Asks for a name, then saves into the Drawings folder. */
+@Composable
+fun NameDialog(c: AppController) {
+    var name by remember {
+        mutableStateOf(
+            c.docName.removeSuffix(".${DocFormat.EXTENSION}")
+                .takeIf { it != AppController.UNTITLED } ?: "Drawing"
+        )
+    }
+    AlertDialog(
+        onDismissRequest = { c.cancelSaveAs() },
+        title = { Text("Save to \u201c${c.folderName ?: "Drawings"}\u201d") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("Name") }
+            )
+        },
+        confirmButton = { TextButton(onClick = { c.saveAs(name) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = { c.cancelSaveAs() }) { Text("Cancel") } }
+    )
+}
+
+/** "Discard current drawing?" before New / Open replaces an unsaved one. */
+@Composable
+fun DiscardDialog(c: AppController) {
+    val action = c.pendingAction ?: return
+    AlertDialog(
+        onDismissRequest = { c.pendingAction = null },
+        title = { Text("Discard current drawing?") },
+        text = { Text("It hasn't been saved to a file yet.") },
+        confirmButton = { TextButton(onClick = { c.saveThen(action) }) { Text("Save\u2026") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { c.pendingAction = null }) { Text("Cancel") }
+                TextButton(onClick = { c.pendingAction = null; action() }) { Text("Discard") }
+            }
+        }
+    )
 }
 
 @Composable
@@ -262,7 +356,7 @@ private fun MenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
 fun FlashLabel(state: CanvasState, modifier: Modifier = Modifier) {
     LaunchedEffect(state.flashId) {
         if (state.flashText != null) {
-            delay(700)
+            delay((700L + 35L * (state.flashText?.length ?: 0)).coerceAtMost(3500L))
             state.flashText = null
         }
     }

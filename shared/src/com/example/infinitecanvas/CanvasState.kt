@@ -17,13 +17,33 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.random.Random
+
+/** Random, practically unique stroke ID (used to merge drawings synced between devices). */
+fun newStrokeId(): String = java.lang.Long.toString(Random.nextLong() and Long.MAX_VALUE, 36)
+
+/** Stable ID for strokes from old files that had none: the same stroke gets the same ID on every device. */
+fun contentStrokeId(points: FloatArray, color: Int, width: Float, filled: Boolean): String {
+    var h = 1125899906842597L
+    for (v in points) h = 31 * h + v.toBits()
+    h = 31 * h + color
+    h = 31 * h + width.toBits()
+    h = 31 * h + if (filled) 1 else 0
+    return "h" + java.lang.Long.toString(h and Long.MAX_VALUE, 36)
+}
 
 /**
  * A finished ink stroke, or a filled lasso shape when [filled] is true.
  * Points are flattened [x0, y0, x1, y1, ...] in WORLD coordinates.
  * [color] is ARGB; fills carry their opacity in the alpha channel.
  */
-class InkStroke(val points: FloatArray, val color: Int, val width: Float, val filled: Boolean = false) {
+class InkStroke(
+    val points: FloatArray,
+    val color: Int,
+    val width: Float,
+    val filled: Boolean = false,
+    val id: String = newStrokeId(),
+) {
     val bounds: Rect
     val path: Path
 
@@ -120,6 +140,12 @@ class CanvasState {
 
     // ---- document ----
     val strokes = mutableStateListOf<InkStroke>()
+
+    /**
+     * IDs of strokes that were erased/removed. Saved in the file so that when two
+     * devices' versions are merged, an erased stroke stays erased.
+     */
+    val deletedIds = HashSet<String>()
     var liveStroke by mutableStateOf<InkStroke?>(null)
         private set
 
@@ -203,6 +229,15 @@ class CanvasState {
             rotation = if (snapRotation) snapDeg(rawRotation) else rawRotation
         }
         offset = focus + pan - rotate(anchor * scale, rotation)
+    }
+
+    /** Rotates by exactly [deg] degrees about [focus] (keyboard shortcut). Respects the lock. */
+    fun rotateBy(deg: Float, focus: Offset) {
+        if (lockRotation) return
+        val anchor = screenToWorld(focus)
+        rotation = normalizeDeg(rotation + deg)
+        rawRotation = rotation
+        offset = focus - rotate(anchor * scale, rotation)
     }
 
     /** Back to 100% and 0°, keeping the centre of the screen where it is. */
@@ -307,6 +342,7 @@ class CanvasState {
             if (hit.isNotEmpty()) {
                 strokes.removeAll(hit)
                 erased.addAll(hit)
+                hit.forEach { deletedIds.add(it.id) }
             }
         }
     }
@@ -325,6 +361,7 @@ class CanvasState {
         if (strokes.isEmpty()) return
         val all = strokes.toList()
         strokes.clear()
+        all.forEach { deletedIds.add(it.id) }
         push(Action.Remove(all))
     }
 
@@ -339,8 +376,8 @@ class CanvasState {
     fun undo(): Boolean {
         val a = undoStack.removeLastOrNull() ?: run { flash("Nothing to undo"); return false }
         when (a) {
-            is Action.Add -> strokes.remove(a.stroke)
-            is Action.Remove -> strokes.addAll(a.strokes)
+            is Action.Add -> { strokes.remove(a.stroke); deletedIds.add(a.stroke.id) }
+            is Action.Remove -> restore(a.strokes)
         }
         redoStack.addLast(a)
         changed()
@@ -351,12 +388,21 @@ class CanvasState {
     fun redo(): Boolean {
         val a = redoStack.removeLastOrNull() ?: run { flash("Nothing to redo"); return false }
         when (a) {
-            is Action.Add -> strokes.add(a.stroke)
-            is Action.Remove -> strokes.removeAll(a.strokes)
+            is Action.Add -> restore(listOf(a.stroke))
+            is Action.Remove -> { strokes.removeAll(a.strokes); a.strokes.forEach { deletedIds.add(it.id) } }
         }
         undoStack.addLast(a)
         changed()
         return true
+    }
+
+    /** Brings strokes back (undo of an erase, redo of a stroke), skipping any already present. */
+    private fun restore(list: List<InkStroke>) {
+        val present = strokes.mapTo(HashSet()) { it.id }
+        for (st in list) {
+            deletedIds.remove(st.id)
+            if (st.id !in present) strokes.add(st)
+        }
     }
 
     private fun changed() {
@@ -366,18 +412,50 @@ class CanvasState {
     }
 
     /** Replaces the whole document (New / Open / restore). Clears undo history. */
-    fun replaceDocument(loaded: List<InkStroke>, camOffset: Offset, camScale: Float, camRotation: Float = 0f) {
+    fun replaceDocument(loaded: List<InkStroke>, deleted: Set<String>) {
         cancelStroke()
         endErase()
         strokes.clear()
-        strokes.addAll(loaded)
+        strokes.addAll(loaded.filter { it.id !in deleted })
+        deletedIds.clear()
+        deletedIds.addAll(deleted)
+        undoStack.clear()
+        redoStack.clear()
+        changed()
+    }
+
+    fun setView(camOffset: Offset, camScale: Float, camRotation: Float) {
         offset = camOffset
         scale = camScale.coerceIn(MIN_SCALE, MAX_SCALE)
         rotation = normalizeDeg(camRotation)
         rawRotation = rotation
-        undoStack.clear()
-        redoStack.clear()
-        changed()
+    }
+
+    /**
+     * Merges another version of this drawing (from the other device) into this one:
+     * strokes from both are kept, and anything erased on either side stays erased.
+     * Undo history is kept. Returns true if THIS version has changes the other lacks,
+     * i.e. the merged result should be written back to the file.
+     */
+    fun mergeFrom(remote: List<InkStroke>, remoteDeleted: Set<String>): Boolean {
+        val allDeleted = HashSet(deletedIds).apply { addAll(remoteDeleted) }
+        val remoteIds = remote.mapTo(HashSet()) { it.id }
+        val localIds = strokes.mapTo(HashSet()) { it.id }
+        val localHasMore =
+            strokes.any { it.id !in remoteIds && it.id !in allDeleted } ||
+                deletedIds.any { it !in remoteDeleted }
+
+        val merged = ArrayList<InkStroke>(strokes.size + remote.size)
+        for (st in strokes) if (st.id !in allDeleted) merged.add(st)
+        for (st in remote) if (st.id !in localIds && st.id !in allDeleted) merged.add(st)
+        deletedIds.addAll(remoteDeleted)
+
+        val same = merged.size == strokes.size && merged.indices.all { merged[it] === strokes[it] }
+        if (!same) {
+            strokes.clear()
+            strokes.addAll(merged)
+        }
+        return localHasMore
     }
 
     /** Union of all stroke bounds, or null when the canvas is empty. */
